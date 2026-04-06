@@ -1,111 +1,198 @@
-import { createdom } from "./createDom.module.js"
-import { allTasks, localstorageSetter, deleteTask as deleteTaskShared } from "./data.js"
+import { createdom } from "./createDom.module.js";
+import { allTasks, localstorageSetter, deleteTask as deleteTaskShared } from "./data.js";
 
 export const key = "tasks";
 
-// Function to render tasks
-const tasksRender = (tasks) => {
+let currentSearch = "";
+let currentFilter = "all";
+
+const getFilteredTasks = () => {
+    return allTasks.filter((task) => {
+        const matchesSearch =
+            task.title.toLowerCase().includes(currentSearch) ||
+            task.content.toLowerCase().includes(currentSearch);
+        const matchesFilter = currentFilter === "all" ? true : task.status === currentFilter;
+        return matchesSearch && matchesFilter;
+    });
+};
+
+const updateStats = () => {
+    const total = allTasks.length;
+    const completed = allTasks.filter((task) => task.status === "completed").length;
+    const pending = total - completed;
+
+    const totalTasks = document.querySelector("#totalTasks");
+    const completedTasks = document.querySelector("#completedTasks");
+    const pendingTasks = document.querySelector("#pendingTasks");
+
+    if (totalTasks) totalTasks.textContent = total;
+    if (completedTasks) completedTasks.textContent = completed;
+    if (pendingTasks) pendingTasks.textContent = pending;
+};
+
+const renderEmptyState = (tasksContainer) => {
+    const emptyState = createdom("div", tasksContainer, "", "empty-state");
+    const isFiltered = currentSearch || currentFilter !== "all";
+
+    createdom("i", emptyState, "", "fa-regular fa-note-sticky");
+    createdom("h3", emptyState, isFiltered ? "No tasks match this view yet." : "No tasks yet.", "h4 mb-2");
+    createdom(
+        "p",
+        emptyState,
+        isFiltered
+            ? "Try a different search or filter to find your tasks."
+            : "Create your first task to start planning your day.",
+        "mb-0"
+    );
+};
+
+const renderTasks = (tasks) => {
     const tasksContainer = document.querySelector("#tasks");
-    if (!tasksContainer) return; // Skip if not on a page with tasks container
-    
+    if (!tasksContainer) return;
+
     tasksContainer.innerHTML = "";
-    tasks.forEach(task => {
-        let card = createdom("div", tasksContainer, "", "card task-card shadow-sm mb-3 border-0 rounded-3","","","","","width:90%");
-        
-        let check = createdom("input", card, "", "form-check-input me-3 mt-2");
+
+    if (!tasks.length) {
+        renderEmptyState(tasksContainer);
+        updateStats();
+        return;
+    }
+
+    tasks.forEach((task) => {
+        const card = createdom("div", tasksContainer, "", "task-card");
+
+        const check = createdom("input", card, "", "form-check-input");
         check.setAttribute("type", "checkbox");
-        if (task.status === "completed") {
-            check.checked = true;
-        }
-        
+        check.setAttribute("aria-label", `Mark ${task.title} as completed`);
+        check.checked = task.status === "completed";
+
         check.addEventListener("change", () => {
             task.status = check.checked ? "completed" : "notcompleted";
             localstorageSetter(key, allTasks);
+            renderActiveView();
         });
 
-        let wrapperParent = createdom("div", card, "", "d-flex justify-content-between align-items-center w-100");
-        let wrapperChild = createdom("div", wrapperParent, "", "flex-grow-1");
+        const wrapperParent = createdom("div", card, "", "d-flex justify-content-between align-items-start gap-3 w-100 flex-wrap flex-md-nowrap");
+        const wrapperChild = createdom("div", wrapperParent, "", "flex-grow-1");
 
+        createdom(
+            "span",
+            wrapperChild,
+            task.status === "completed" ? "Completed" : "Pending",
+            `task-status-badge ${task.status === "completed" ? "completed" : "pending"}`
+        );
         createdom("h5", wrapperChild, task.title, "text-capitalize mb-1 fw-bold");
-        createdom("small", wrapperChild, task.date, "text-muted d-block mb-2");
-        createdom("p", wrapperChild, task.content, "mb-0");
+        createdom("small", wrapperChild, task.date, "d-block mb-2");
+        createdom("p", wrapperChild, task.content, "");
 
-        let wrapper = createdom("div", wrapperParent, "", "d-flex gap-2");
+        const wrapper = createdom("div", wrapperParent, "", "task-actions d-flex gap-2");
 
-        let editBtn = createdom("button", wrapper, `<i class="fa-solid fa-pen-to-square"></i>`, "btn btn-sm btn-outline-primary rounded-pill");
+        const editBtn = createdom("button", wrapper, `<i class="fa-solid fa-pen-to-square"></i>`, "btn btn-sm btn-outline-info rounded-circle");
+        editBtn.setAttribute("aria-label", `Edit ${task.title}`);
         editBtn.addEventListener("click", () => {
             document.querySelector("#title").value = task.title;
             document.querySelector("#date").value = task.date;
             document.querySelector("#content").value = task.content;
+            updateContentCount();
+
             const updatedTasks = deleteTaskShared(task, allTasks);
             allTasks.length = 0;
             allTasks.push(...updatedTasks);
-            tasksRender(allTasks);
+            renderActiveView();
         });
 
-        let deleteBtn = createdom("button", wrapper, `<i class="fa-solid fa-trash"></i>`, "btn btn-sm btn-outline-danger rounded-pill");
+        const deleteBtn = createdom("button", wrapper, `<i class="fa-solid fa-trash"></i>`, "btn btn-sm btn-outline-danger rounded-circle");
+        deleteBtn.setAttribute("aria-label", `Delete ${task.title}`);
         deleteBtn.addEventListener("click", () => {
             const updatedTasks = deleteTaskShared(task, allTasks);
             allTasks.length = 0;
             allTasks.push(...updatedTasks);
-            tasksRender(allTasks);
+            renderActiveView();
         });
     });
+
+    updateStats();
 };
 
-// Only run this code on pages that have the task management UI
+const renderActiveView = () => {
+    renderTasks(getFilteredTasks());
+};
+
+const updateContentCount = () => {
+    const content = document.querySelector("#content");
+    const contentCount = document.querySelector("#contentCount");
+    if (!content || !contentCount) return;
+
+    contentCount.textContent = content.value.length;
+};
+
 if (document.querySelector("#tasks")) {
-    const AddButton = document.querySelector("#create");
-    
-    const reedObject = () => ({
+    const addButton = document.querySelector("#create");
+    const search = document.querySelector("#search");
+    const titleInput = document.querySelector("#title");
+    const dateInput = document.querySelector("#date");
+    const contentInput = document.querySelector("#content");
+
+    const readObject = () => ({
         id: Date.now(),
-        title: document.querySelector("#title").value,
-        date: document.querySelector("#date").value,
-        content: document.querySelector("#content").value,
+        title: titleInput.value.trim(),
+        date: dateInput.value,
+        content: contentInput.value.trim(),
         status: "notcompleted"
     });
 
-    const addToLocalsorage = (task) => {
+    const addToLocalStorage = (task) => {
         allTasks.unshift(task);
         localstorageSetter(key, allTasks);
     };
 
-    const formcheck = () => {
-        const title = document.querySelector("#title").value.trim();
-        const date = document.querySelector("#date").value;
-        const content = document.querySelector("#content").value.trim();
-        
-        // Check if any field is empty
+    const formCheck = () => {
+        const title = titleInput.value.trim();
+        const date = dateInput.value;
+        const content = contentInput.value.trim();
+
         if (!title || !date || !content) {
             return { isValid: false, message: "Please fill in all fields" };
         }
-        
-        // Check if date is in the past
+
+        if (content.length > 240) {
+            return { isValid: false, message: "Task details should stay within 240 characters" };
+        }
+
         const selectedDate = new Date(date);
         const today = new Date();
-        today.setHours(0, 0, 0, 0); // Reset time part to compare dates only
-        
+        today.setHours(0, 0, 0, 0);
+
         if (selectedDate < today) {
             return { isValid: false, message: "Please select today's or a future date" };
         }
-        
+
         return { isValid: true };
     };
 
-    const clearform = () => {
-        document.querySelector("#title").value = "";
-        document.querySelector("#date").value = "";
-        document.querySelector("#content").value = "";
+    const clearForm = () => {
+        titleInput.value = "";
+        dateInput.value = "";
+        contentInput.value = "";
+        updateContentCount();
     };
 
-    AddButton.addEventListener("click", () => {
-        const validation = formcheck();
+    const setMinDate = () => {
+        const today = new Date();
+        const month = `${today.getMonth() + 1}`.padStart(2, "0");
+        const day = `${today.getDate()}`.padStart(2, "0");
+        dateInput.min = `${today.getFullYear()}-${month}-${day}`;
+    };
+
+    addButton.addEventListener("click", () => {
+        const validation = formCheck();
+
         if (validation.isValid) {
-            const newTask = reedObject();
-            addToLocalsorage(newTask);
-            tasksRender(allTasks);
-            clearform();
-        } else if (typeof Swal !== 'undefined') {
+            const newTask = readObject();
+            addToLocalStorage(newTask);
+            clearForm();
+            renderActiveView();
+        } else if (typeof Swal !== "undefined") {
             Swal.fire({
                 icon: "error",
                 title: "Oops...",
@@ -114,41 +201,34 @@ if (document.querySelector("#tasks")) {
         }
     });
 
-    // Search functionality
-    const search = document.querySelector("#search");
     if (search) {
         search.addEventListener("input", () => {
-            const searchTerm = search.value.toLowerCase();
-            const filter = allTasks.filter(task => 
-                task.title.toLowerCase().includes(searchTerm) ||
-                task.content.toLowerCase().includes(searchTerm)
-            );
-            tasksRender(filter);
+            currentSearch = search.value.trim().toLowerCase();
+            renderActiveView();
         });
     }
 
-    // Filter functionality
-    const makeFilter = (btn, word, status) => {
+    if (contentInput) {
+        contentInput.addEventListener("input", updateContentCount);
+    }
+
+    const makeFilter = (btn, label, status) => {
         if (!btn) return;
-        
-        btn.addEventListener("click", () => {
+
+        btn.addEventListener("click", (event) => {
+            event.preventDefault();
+            currentFilter = status;
             const screen = document.querySelector(".screen");
-            if (word.toLowerCase() === "all") {
-                tasksRender(allTasks);
-                if (screen) screen.textContent = "All";
-            } else {
-                const filter = allTasks.filter(task => task.status === status);
-                tasksRender(filter);
-                if (screen) screen.textContent = word;
-            }
+            if (screen) screen.textContent = label;
+            renderActiveView();
         });
     };
 
-    // Initialize filters
     makeFilter(document.querySelector("#showcompleted"), "Completed", "completed");
     makeFilter(document.querySelector("#shownotcompleted"), "Not Completed", "notcompleted");
-    makeFilter(document.querySelector("#all"), "All");
+    makeFilter(document.querySelector("#all"), "All", "all");
 
-    // Initial render
-    tasksRender(allTasks);
+    setMinDate();
+    updateContentCount();
+    renderActiveView();
 }
